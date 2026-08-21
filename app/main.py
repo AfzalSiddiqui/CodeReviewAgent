@@ -19,6 +19,8 @@ def review_pr(owner: str, repo: str, pr_number: int):
         files = get_pull_request_files(owner, repo, pr_number)
     except httpx.HTTPStatusError as e:
         raise HTTPException(status_code=e.response.status_code, detail=str(e))
+    except httpx.HTTPError as e:
+        raise HTTPException(status_code=502, detail=f"GitHub API error: {str(e)}")
 
     return {
         "pr_title": pr.get("title"),
