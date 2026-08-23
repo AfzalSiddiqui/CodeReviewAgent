@@ -1,4 +1,6 @@
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
+from app.github import get_pull_request, get_pull_request_files
+import httpx
 
 app = FastAPI(title="GitHub PR Review Agent")
 
@@ -10,8 +12,23 @@ def home():
     }
 
 
-@app.post("/review-pr")
-def review_pr():
+@app.get("/review-pr")
+def review_pr(owner: str, repo: str, pr_number: int):
+    try:
+        pr = get_pull_request(owner, repo, pr_number)
+        files = get_pull_request_files(owner, repo, pr_number)
+    except httpx.HTTPStatusError as e:
+        raise HTTPException(status_code=e.response.status_code, detail=str(e))
+
     return {
-        "message": "PR review coming soon"
+        "pr_title": pr.get("title"),
+        "pr_state": pr.get("state"),
+        "changed_files": [
+            {
+                "filename": f.get("filename"),
+                "status": f.get("status"),
+                "patch": f.get("patch"),
+            }
+            for f in files
+        ],
     }
