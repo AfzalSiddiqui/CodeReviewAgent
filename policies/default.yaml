@@ -1,0 +1,69 @@
+review:
+  categories:
+
+    code_quality:
+      enabled: true
+      checks:
+        - readability
+        - naming
+        - duplication
+        - complexity
+
+    logic:
+      enabled: true
+      checks:
+        - incorrect_logic
+        - edge_cases
+        - null_handling
+        - error_handling
+
+    security:
+      enabled: true
+      checks:
+        - hardcoded_secrets
+        - insecure_data_handling
+        - authentication
+        - authorization
+        - sensitive_data_logging
+
+    performance:
+      enabled: true
+      checks:
+        - unnecessary_work
+        - memory_usage
+        - network_usage
+        - expensive_operations
+
+    architecture:
+      enabled: true
+      checks:
+        - separation_of_concerns
+        - single_responsibility
+        - dependency_management
+
+    testing:
+      enabled: true
+      checks:
+        - unit_tests
+        - edge_case_tests
+        - regression_tests
+
+    logging:
+      enabled: true
+      checks:
+        - useful_logging
+        - sensitive_data_not_logged
+
+    modern_practices:
+      enabled: true
+      checks:
+        - deprecated_apis
+        - outdated_patterns
+        - current_framework_practices
+
+    recommendations:
+      enabled: true
+      checks:
+        - maintainability
+        - scalability
+        - developer_experience
