@@ -5,6 +5,9 @@ from dotenv import load_dotenv
 load_dotenv()
 
 GITHUB_TOKEN = os.getenv("GITHUB_TOKEN")
+if not GITHUB_TOKEN:
+    raise RuntimeError("GITHUB_TOKEN environment variable is not set")
+
 GITHUB_API = "https://api.github.com"
 
 HEADERS = {
