@@ -1,4 +1,8 @@
-from fastapi import FastAPI
+import json
+import logging
+
+from fastapi import BackgroundTasks, FastAPI, Request
+from fastapi.responses import JSONResponse
 
 from app.github import get_pull_request, get_pull_request_files
 from app.agent import ReviewPolicy
@@ -11,7 +15,9 @@ from app.github_comments import (
     parse_diff_lines,
     parse_valid_lines,
 )
+from app.webhook import verify_webhook_signature
 
+logger = logging.getLogger(__name__)
 
 app = FastAPI(title="GitHub PR Review Agent")
 
@@ -19,39 +25,14 @@ policy = ReviewPolicy()
 ai_reviewer = AIReviewer()
 
 
-@app.get("/")
-def home():
-
-    return {
-        "message": "GitHub PR Review Agent is running"
-    }
-
-
-@app.get("/review-policy")
-def review_policy():
-
-    return {
-        "categories": policy.get_categories(),
-        "checks": policy.get_checks()
-    }
-
-
-@app.post("/review-pr")
-def review_pr(owner: str, repo: str, pr_number: int):
+def run_review(owner: str, repo: str, pr_number: int) -> dict:
+    """Core review logic shared by the manual endpoint and the webhook."""
 
     # 1. Get PR information
-    pr = get_pull_request(
-        owner,
-        repo,
-        pr_number
-    )
+    pr = get_pull_request(owner, repo, pr_number)
 
     # 2. Get changed files
-    files = get_pull_request_files(
-        owner,
-        repo,
-        pr_number
-    )
+    files = get_pull_request_files(owner, repo, pr_number)
 
     # 3. Build structured diff with explicit line numbers
     #    so the AI can only reference lines we know are valid.
@@ -59,9 +40,7 @@ def review_pr(owner: str, repo: str, pr_number: int):
     valid_lines_by_file: dict[str, set[int]] = {}
 
     for file in files:
-
         patch = file.get("patch")
-
         if not patch:
             continue
 
@@ -93,7 +72,6 @@ def review_pr(owner: str, repo: str, pr_number: int):
     review_comments: list[dict] = []
 
     for finding in ai_review.get("findings", []):
-
         file_path = finding.get("file")
         line = finding.get("line")
 
@@ -103,9 +81,9 @@ def review_pr(owner: str, repo: str, pr_number: int):
         # Validate that the line actually exists in the diff
         valid = valid_lines_by_file.get(file_path, set())
         if line not in valid:
-            print(
-                f"Skipping finding: line {line} not in diff for {file_path}"
-                f" (valid: {sorted(valid)[:20]})"
+            logger.info(
+                "Skipping finding: line %d not in diff for %s (valid: %s)",
+                line, file_path, sorted(valid)[:20],
             )
             continue
 
@@ -142,8 +120,8 @@ def review_pr(owner: str, repo: str, pr_number: int):
                 comments=review_comments,
             )
         except Exception as e:
-            print(f"Batch review failed: {e}")
-            print("Falling back to individual comments...")
+            logger.warning("Batch review failed: %s", e)
+            logger.info("Falling back to individual comments...")
 
             # Fall back: post each comment individually, skip failures
             posted = 0
@@ -160,11 +138,11 @@ def review_pr(owner: str, repo: str, pr_number: int):
                     )
                     posted += 1
                 except Exception as ce:
-                    print(
-                        f"Skipping comment {c['path']}:{c['line']}: {ce}"
+                    logger.warning(
+                        "Skipping comment %s:%s: %s", c["path"], c["line"], ce,
                     )
 
-            print(f"Posted {posted}/{len(review_comments)} inline comments")
+            logger.info("Posted %d/%d inline comments", posted, len(review_comments))
 
             # Post the summary as a general PR comment
             create_pull_request_comment(
@@ -194,3 +172,72 @@ def review_pr(owner: str, repo: str, pr_number: int):
             for file in files
         ],
     }
+
+
+def run_review_safe(owner: str, repo: str, pr_number: int) -> None:
+    """Wrapper that catches and logs exceptions — safe for background tasks."""
+    try:
+        logger.info("Starting review for %s/%s#%d", owner, repo, pr_number)
+        run_review(owner, repo, pr_number)
+        logger.info("Review completed for %s/%s#%d", owner, repo, pr_number)
+    except Exception:
+        logger.exception("Review failed for %s/%s#%d", owner, repo, pr_number)
+
+
+# ── Endpoints ───────────────────────────────────────────────────────────
+
+
+@app.get("/")
+def home():
+    return {
+        "message": "GitHub PR Review Agent is running"
+    }
+
+
+@app.get("/review-policy")
+def review_policy():
+    return {
+        "categories": policy.get_categories(),
+        "checks": policy.get_checks()
+    }
+
+
+@app.post("/review-pr")
+def review_pr(owner: str, repo: str, pr_number: int):
+    return run_review(owner, repo, pr_number)
+
+
+@app.post("/webhook")
+async def webhook(request: Request, background_tasks: BackgroundTasks):
+    # 1. Verify HMAC signature
+    body = await verify_webhook_signature(request)
+    payload = json.loads(body)
+
+    # 2. Handle ping event (GitHub sends this when the webhook is first configured)
+    event = request.headers.get("X-GitHub-Event", "")
+
+    if event == "ping":
+        return {"message": "pong"}
+
+    # 3. Handle pull_request events
+    if event == "pull_request":
+        action = payload.get("action")
+        if action in ("opened", "synchronize", "reopened"):
+            repo_info = payload["repository"]
+            owner = repo_info["owner"]["login"]
+            repo = repo_info["name"]
+            pr_number = payload["pull_request"]["number"]
+
+            logger.info(
+                "Webhook: scheduling review for %s/%s#%d (action=%s)",
+                owner, repo, pr_number, action,
+            )
+            background_tasks.add_task(run_review_safe, owner, repo, pr_number)
+
+            return JSONResponse(
+                content={"message": "Review scheduled"},
+                status_code=202,
+            )
+
+    # 4. Ignore all other events
+    return {"message": "Event ignored"}
