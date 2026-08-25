@@ -19,7 +19,7 @@ from app.webhook import verify_webhook_signature
 
 logger = logging.getLogger(__name__)
 
-app = FastAPI(title="GitHub PR Review Agent")
+app = FastAPI(title="CodeReviewAgent")
 
 policy = ReviewPolicy()
 ai_reviewer = AIReviewer()
@@ -190,7 +190,7 @@ def run_review_safe(owner: str, repo: str, pr_number: int) -> None:
 @app.get("/")
 def home():
     return {
-        "message": "GitHub PR Review Agent is running"
+        "message": "CodeReviewAgent is running"
     }
 
 
