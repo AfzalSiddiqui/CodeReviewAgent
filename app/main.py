@@ -3,18 +3,40 @@ import logging
 
 from fastapi import BackgroundTasks, FastAPI, Request
 from fastapi.responses import JSONResponse
+from pydantic import BaseModel
 
-from app.agent import PRReviewAgent
+from app.agent import Orchestrator
+from app.rag import VectorStore
 from app.webhook import verify_webhook_signature
 
 logger = logging.getLogger(__name__)
 
 app = FastAPI(title="CodeReviewAgent")
 
-agent = PRReviewAgent()
+orchestrator = Orchestrator()
+vector_store = orchestrator.vector_store
 
 
-# ── Endpoints ───────────────────────────────────────────────────────────
+# ── Request models ────────────────────────────────────────────────
+
+
+class PolicyRequest(BaseModel):
+    id: str
+    text: str
+    metadata: dict | None = None
+
+
+class BulkPolicyRequest(BaseModel):
+    policies: list[PolicyRequest]
+
+
+class SearchRequest(BaseModel):
+    query: str
+    n_results: int = 3
+    category_filter: str | None = None
+
+
+# ── Endpoints ─────────────────────────────────────────────────────
 
 
 @app.get("/")
@@ -27,14 +49,18 @@ def home():
 @app.get("/review-policy")
 def review_policy():
     return {
-        "categories": agent.policy.get_categories(),
-        "checks": agent.policy.get_checks()
+        "categories": orchestrator.policy.get_categories(),
+        "checks": orchestrator.policy.get_checks(),
+        "agents": {
+            name: orchestrator.policy.get_agent_config(name)
+            for name in orchestrator.policy.get_enabled_agents()
+        },
     }
 
 
 @app.post("/review-pr")
-def review_pr(owner: str, repo: str, pr_number: int):
-    return agent.review(owner, repo, pr_number)
+async def review_pr(owner: str, repo: str, pr_number: int):
+    return await orchestrator.review(owner, repo, pr_number)
 
 
 @app.post("/webhook")
@@ -62,7 +88,9 @@ async def webhook(request: Request, background_tasks: BackgroundTasks):
                 "Webhook: scheduling review for %s/%s#%d (action=%s)",
                 owner, repo, pr_number, action,
             )
-            background_tasks.add_task(agent.review_safe, owner, repo, pr_number)
+            background_tasks.add_task(
+                orchestrator.review_safe, owner, repo, pr_number,
+            )
 
             return JSONResponse(
                 content={"message": "Review scheduled"},
@@ -71,3 +99,41 @@ async def webhook(request: Request, background_tasks: BackgroundTasks):
 
     # 4. Ignore all other events
     return {"message": "Event ignored"}
+
+
+# ── RAG Endpoints ─────────────────────────────────────────────────
+
+
+@app.post("/rag/policies")
+def add_policy(req: PolicyRequest):
+    vector_store.add_policy(
+        policy_id=req.id,
+        text=req.text,
+        metadata=req.metadata,
+    )
+    return {"status": "ok", "id": req.id}
+
+
+@app.post("/rag/policies/bulk")
+def add_policies_bulk(req: BulkPolicyRequest):
+    policies = [
+        {"id": p.id, "text": p.text, "metadata": p.metadata or {}}
+        for p in req.policies
+    ]
+    vector_store.add_policies_bulk(policies)
+    return {"status": "ok", "count": len(policies)}
+
+
+@app.get("/rag/policies/count")
+def policies_count():
+    return {"count": vector_store.count()}
+
+
+@app.post("/rag/search")
+def rag_search(req: SearchRequest):
+    results = vector_store.search(
+        query=req.query,
+        n_results=req.n_results,
+        category_filter=req.category_filter,
+    )
+    return results

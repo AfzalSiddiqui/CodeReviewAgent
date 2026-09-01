@@ -67,3 +67,44 @@ review:
         - maintainability
         - scalability
         - developer_experience
+
+    dependencies:
+      enabled: true
+      checks:
+        - import_correctness
+        - version_conflicts
+        - unused_dependencies
+        - vulnerable_packages
+
+  agents:
+    security:
+      enabled: true
+      model: "qwen2.5-coder:14b"
+      categories: [security]
+    logic_bug:
+      enabled: true
+      model: "qwen2.5-coder:14b"
+      categories: [logic]
+    performance:
+      enabled: true
+      model: "qwen2.5-coder:7b"
+      categories: [performance]
+    code_quality:
+      enabled: true
+      model: "qwen2.5-coder:7b"
+      categories: [code_quality, architecture, modern_practices, logging, recommendations]
+    test_coverage:
+      enabled: true
+      model: "qwen2.5-coder:7b"
+      categories: [testing]
+    dependency:
+      enabled: true
+      model: "qwen2.5-coder:7b"
+      categories: [dependencies]
+    summary:
+      enabled: true
+      model: "qwen2.5-coder:7b"
+      categories: []
+
+  defaults:
+    model: "qwen2.5-coder:7b"

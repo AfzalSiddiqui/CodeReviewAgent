@@ -6,3 +6,4 @@ httpx
 PyYAML
 openai
 ollama
+chromadb
