@@ -85,11 +85,11 @@ class Orchestrator:
         # Step 3: Merge & deduplicate
         merged = self._deduplicate(all_findings)
 
-        # Step 4: Summary agent
-        summary_result = await self.summary_agent.summarize(merged, structured_diff)
-
-        # Step 5: Validate findings
+        # Step 4: Validate findings (before summary so it only sees real findings)
         validated = self._validate_findings(merged, valid_lines)
+
+        # Step 5: Summary agent
+        summary_result = await self.summary_agent.summarize(validated, structured_diff)
 
         # Step 6: Enrich HIGH/CRITICAL findings
         enriched = self._enrich_findings(validated, owner, repo, pr)
